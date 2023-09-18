@@ -1,11 +1,15 @@
 package main
+
 // https://www.youtube.com/watch?v=1XPktts9USg
 
 import (
-	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/bsanzhiev/go-fiber-postgres/models"
+	"github.com/bsanzhiev/go-fiber-postgres/storage"
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
 	"gorm.io/gorm"
@@ -32,14 +36,15 @@ func (r *Repository) CreateBooks(context *fiber.Ctx) error {
 		return err
 	}
 
-	errCreate := r.DB.Create(&book).Error
-	if errCreate != nil {
-		context.Status(http.StatusBadRequest).JSON(
-			&fiber.Map{"message": "could not create book"})
+	err = r.DB.Create(&book).Error
+	if err != nil {
+		context.Status(http.StatusBadRequest).JSON(&fiber.Map{
+			"message": "could not create book"})
 		return err
 	}
 
-	context.Status(http.StatusOK).JSON(&fiber.Map{"message": "books has been added"})
+	context.Status(http.StatusOK).JSON(&fiber.Map{
+		"message": "books has been added"})
 
 	return nil
 }
@@ -49,7 +54,8 @@ func (r *Repository) GetBooks(context *fiber.Ctx) error {
 
 	err := r.DB.Find(bookModels).Error
 	if err != nil {
-		context.Status(http.StatusBadRequest).JSON(&fiber.Map{"message": "could not get books"})
+		context.Status(http.StatusBadRequest).JSON(&fiber.Map{
+			"message": "could not get books"})
 		return nil
 	}
 
@@ -58,6 +64,51 @@ func (r *Repository) GetBooks(context *fiber.Ctx) error {
 		"date":    bookModels,
 	})
 
+	return nil
+}
+
+func (r *Repository) DeleteBook(context *fiber.Ctx) error {
+	bookModel := models.Books{}
+	id := context.Params("id")
+	if id == "" {
+		context.Status(http.StatusInternalServerError).JSON(&fiber.Map{
+			"message": "id cannot be empty"})
+		return nil
+	}
+	err := r.DB.Delete(bookModel, id)
+	if err.Error != nil {
+		context.Status(http.StatusBadRequest).JSON(&fiber.Map{
+			"message": "could not delete a book"})
+		return err.Error
+	}
+	context.Status(http.StatusOK).JSON(&fiber.Map{
+		"message": "book deleted successfully"})
+
+	return nil
+}
+
+func (r *Repository) GetBooksByID(context *fiber.Ctx) error {
+	id := context.Params("id")
+	bookModel := models.Books{}
+
+	if id == "" {
+		context.Status(http.StatusInternalServerError).JSON(&fiber.Map{
+			"message": "id cannot be empty"})
+		return nil
+	}
+
+	fmt.Println("the ID is", id)
+
+	err := r.DB.Where("id = ?", id).First(bookModel).Error
+	if err != nil {
+		context.Status(http.StatusBadRequest).JSON(
+			&fiber.Map{"message": "could not get a book by ID"})
+		return err
+	}
+	context.Status(http.StatusOK).JSON(&fiber.Map{
+		"message": "book id fetched successfully",
+		"data":    bookModel,
+	})
 	return nil
 }
 
@@ -72,12 +123,26 @@ func (r *Repository) SetupRoutes(app *fiber.App) {
 func main() {
 	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("error while parsing env file")
+	}
+
+	config := &storage.Config{
+		Host:     os.Getenv("DB_HOST"),
+		Port:     os.Getenv("DB_PORT"),
+		Password: os.Getenv("DB_PASS"),
+		User:     os.Getenv("DB_USER"),
+		SSLMode:  os.Getenv("DB_SSLMODE"),
+		DBName:   os.Getenv("DB_NAME"),
 	}
 
 	db, err := storage.NewConnection(config)
 	if err != nil {
-		log.Fatal("could not load the database" + err)
+		log.Fatal(err)
+	}
+
+	err = models.MigrateBooks(db)
+	if err != nil {
+		log.Fatal("could not migration db")
 	}
 
 	r := Repository{
